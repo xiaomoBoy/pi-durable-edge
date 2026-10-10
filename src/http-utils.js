@@ -7,6 +7,7 @@ export class ClientError extends Error {
     super(message);
     this.name = 'ClientError';
     this.status = status;
+    this.code = 'PI_EDGE_CLIENT_ERROR_V1';
   }
 }
 
@@ -59,8 +60,15 @@ export async function readJsonObject(request, maxBytes = 16 * 1024) {
 }
 
 export function publicError(error) {
-  if (error instanceof ClientError) {
-    return { status: error.status, message: error.message };
+  // Durable Object RPC reconstructs Errors; custom instanceof checks do not
+  // survive the boundary. Enhanced serialization preserves own serializable
+  // fields for compatibility dates >= 2026-04-21.
+  const isClientError = error instanceof ClientError ||
+    (error?.name === 'ClientError' && error?.code === 'PI_EDGE_CLIENT_ERROR_V1');
+  if (isClientError && [400, 409, 413, 415].includes(error.status)) {
+    const message = typeof error.message === 'string' && error.message.length <= 250
+      ? error.message : '请求参数无效';
+    return { status: error.status, message };
   }
   return { status: 500, message: '请求未完成。请检查 Workers 日志、运行额度与服务连接。' };
 }
