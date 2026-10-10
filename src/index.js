@@ -162,15 +162,25 @@ export class Assistant extends Agent {
       // setModel must succeed before we commit the settings. On storage failure,
       // restore the old session model rather than returning an inconsistent state.
       const previousModel = oldConfig.api === 'faux' ? this.fauxModel : modelDescriptor(oldConfig);
-      await session.setModel(model);
       try {
-        this.ctx.storage.sql.exec(
-          'INSERT INTO edge_model_settings (id, config, secret) VALUES (1, ?, ?) ON CONFLICT(id) DO UPDATE SET config = excluded.config, secret = excluded.secret',
-          JSON.stringify(config), secret
-        );
+        await session.setModel(model);
+        try {
+          this.ctx.storage.sql.exec(
+            'INSERT INTO edge_model_settings (id, config, secret) VALUES (1, ?, ?) ON CONFLICT(id) DO UPDATE SET config = excluded.config, secret = excluded.secret',
+            JSON.stringify(config), secret
+          );
+        } catch (error) {
+          try { await session.setModel(previousModel); }
+          catch { /* preserve the original storage failure */ }
+          throw error;
+        }
       } catch (error) {
-        try { await session.setModel(previousModel); }
-        catch { /* surface original persistence failure; log only the error name */ }
+        // Models.setProvider replaces a provider with the same id. Undo it if
+        // setModel or SQL failed, otherwise the old session could use the new
+        // provider's endpoint with the old model / key.
+        if (oldConfig.api !== 'faux' && this.models) {
+          this.models.setProvider(configuredProvider(oldConfig, () => this.decryptSavedKey()).provider);
+        }
         throw error;
       }
       return { ...config, hasKey: Boolean(secret) };
