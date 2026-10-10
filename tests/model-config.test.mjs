@@ -17,7 +17,7 @@ test('valid OpenAI and Anthropic configurations', () => {
   assert.equal(validateModelConfig({ ...example, api: 'anthropic-messages', baseUrl: 'https://api.anthropic.com', model: 'claude-sonnet-4-5' }).api, 'anthropic-messages');
 });
 test('refuse SSRF-prone and non-HTTPS model endpoints', () => {
-  for (const baseUrl of ['http://evil.example/v1', 'https://localhost/v1', 'https://169.254.169.254/v1', 'https://10.0.0.1/v1', 'https://internal.local/v1', 'https://u:password@example.com/v1']) {
+  for (const baseUrl of ['http://evil.example/v1', 'https://localhost/v1', 'https://localhost./v1', 'https://169.254.169.254/v1', 'https://10.0.0.1/v1', 'https://127.1/v1', 'https://0x7f000001/v1', 'https://2130706433/v1', 'https://[::1]/v1', 'https://[::ffff:127.0.0.1]/v1', 'https://internal.local/v1', 'https://printer.home/v1', 'https://u:password@example.com/v1']) {
     assert.throws(() => validateModelConfig({ ...example, baseUrl }), /Base URL/);
   }
 });
@@ -39,4 +39,14 @@ test('provider custom auth uses the encrypted key resolver', async () => {
   assert.equal(model.provider, 'edge-configured');
   assert.equal(model.id, 'gpt-4.1-mini');
   assert.equal(provider.id, 'edge-configured');
+});
+
+test('public gateway hostnames and nonstandard HTTPS ports are accepted', () => {
+  const cfg = validateModelConfig({ ...example, baseUrl: 'https://gateway.example.com:8443/v1/' });
+  assert.equal(cfg.baseUrl, 'https://gateway.example.com:8443/v1');
+});
+test('reused encrypted key remains bound to deployment secret', async () => {
+  const secret = await sealKey('provider-key-123456789', access);
+  assert.equal(await openKey(secret, access), 'provider-key-123456789');
+  await assert.rejects(() => openKey(secret, 'a-different-access-token-with-24-characters'));
 });
