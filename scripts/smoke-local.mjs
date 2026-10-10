@@ -11,7 +11,6 @@ const varsFile = '.dev.vars';
 const port = 18789;
 const base = 'http://127.0.0.1:' + port;
 const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
-const timeout = AbortSignal.timeout(6000);
 let output = '';
 let server;
 
@@ -102,6 +101,38 @@ async function main() {
     return replied && fired;
   }, 60000, 'Faux durable chat and reminder alarm');
   console.log('PiHarness Faux transcript, idempotency and Agent alarm: OK');
+  // Validate actual PiHarness session.setModel + encrypted SQLite config.
+  // A fake API key is stored but no external model request is made.
+  const apiKey = 'sk-test-not-a-real-provider-key';
+  const realModel = {
+    api: 'openai-completions', baseUrl: 'https://api.openai.com/v1',
+    model: 'gpt-4.1-mini', reasoning: false, contextWindow: 128000,
+    maxTokens: 2048, apiKey,
+  };
+  const saved = await fetchJson('/api/model', { method: 'PUT', body: JSON.stringify(realModel) });
+  assert.equal(saved.status, 200, JSON.stringify(saved.body));
+  assert.equal(saved.body.hasKey, true);
+  assert.equal(JSON.stringify(saved.body).includes(apiKey), false);
+
+  const afterSave = await fetchJson('/api/model');
+  assert.equal(afterSave.status, 200);
+  assert.equal(afterSave.body.model, 'gpt-4.1-mini');
+  assert.equal(afterSave.body.hasKey, true);
+  assert.equal(JSON.stringify(afterSave.body).includes(apiKey), false);
+
+  const reused = await fetchJson('/api/model', {
+    method: 'PUT', body: JSON.stringify({ ...realModel, model: 'gpt-4.1-nano', apiKey: '' }),
+  });
+  assert.equal(reused.status, 200, JSON.stringify(reused.body));
+  assert.equal(reused.body.hasKey, true);
+
+  const reset = await fetchJson('/api/model', { method: 'PUT', body: JSON.stringify({ api: 'faux' }) });
+  assert.equal(reset.status, 200, JSON.stringify(reset.body));
+  const afterReset = await fetchJson('/api/model');
+  assert.equal(afterReset.body.api, 'faux');
+  assert.equal(afterReset.body.hasKey, false);
+  console.log('PiHarness live model switching, AES-GCM persistence and Key redaction: OK');
+
 }
 try {
   await main();
