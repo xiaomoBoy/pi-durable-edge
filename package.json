@@ -1,6 +1,6 @@
 {
   "name": "pi-durable-edge",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "private": true,
   "type": "module",
   "engines": {
@@ -9,7 +9,8 @@
   "scripts": {
     "dev": "wrangler dev",
     "deploy": "wrangler deploy",
-    "check": "node --check src/index.js && node --check src/model-config.js && node --check public/app.js && node --check public/mascot.js && node scripts/verify-structure.mjs && node --test tests/*.test.mjs"
+    "check": "node --check src/index.js && node --check src/model-config.js && node --check src/http-utils.js && node --check public/app.js && node --check public/mascot.js && node --check scripts/smoke-local.mjs && node scripts/verify-structure.mjs && node --test tests/*.test.mjs",
+    "test:smoke": "node scripts/smoke-local.mjs"
   },
   "dependencies": {
     "agents": "0.28.0",
