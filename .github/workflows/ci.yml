@@ -19,3 +19,6 @@ jobs:
       - run: npm install --no-audit --no-fund
       - run: npm run check
       - run: npx wrangler deploy --dry-run --outdir dist-cf
+      - name: Local Durable Object integration smoke
+        run: npm run test:smoke
+        timeout-minutes: 3
