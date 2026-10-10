@@ -139,7 +139,7 @@
           <div class="field"><label for="model-max">最大输出（Token）</label><input id="model-max" type="number" min="128" max="2000000" value="8192"></div>
           <div class="field full"><label><input type="checkbox" id="model-reasoning" style="flex:0"> 支持推理 / Thinking</label></div>
         </div>
-        <div class="settings-note">API Key 在 Worker 端使用 AES-GCM 加密保存，页面不会显示已保存的明文。更换协议或 Base URL 时必须重新填写 Key；更换 ACCESS_TOKEN 后需重新配置 API Key。仅使用你信任的 HTTPS 服务地址。模型 API 可能产生费用。</div>
+        <div class="settings-note">API Key 在 Worker 端使用 AES-GCM 加密保存，页面不会显示已保存的明文。更换协议或 Base URL 时必须重新填写 Key；更换 ACCESS_TOKEN 或切回 Faux 后，需重新录入真实模型 API Key。仅使用你信任的公共 HTTPS 服务地址。真实模型 API 可能产生费用。</div>
         <div class="controls"><button id="model-save" class="primary" type="submit">保存并启用模型</button><button id="model-reload" type="button">重新载入配置</button></div>
         <div id="model-feedback" class="muted" aria-live="polite">连接后读取模型配置。</div>
       </form>
