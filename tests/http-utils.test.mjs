@@ -24,3 +24,10 @@ test('status mapping never leaks unexpected provider error messages', () => {
   const client = publicError(new ClientError('输入错误'));
   assert.deepEqual(client, { status: 400, message: '输入错误' });
 });
+
+test('reconstructed Durable Object RPC client errors preserve safe HTTP status', () => {
+  const remote = { name: 'ClientError', code: 'PI_EDGE_CLIENT_ERROR_V1', status: 400, message: '消息长度须为 1–4000 字' };
+  assert.deepEqual(publicError(remote), { status: 400, message: remote.message });
+  assert.equal(publicError({ ...remote, code: 'fake' }).status, 500);
+  assert.equal(publicError({ ...remote, status: 500 }).status, 500);
+});
