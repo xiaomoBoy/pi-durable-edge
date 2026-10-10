@@ -1,12 +1,9 @@
-/**
- * Cloudflare edition of xiaomoBoy/pi-durable-assistant (minimal first release).
- * Real Pi Durable + PiHarness; the only model is Pi AI's scripted faux provider.
- * No API key, Containers, or paid AI model is required.
- */
+/** Pi Durable Edge v0.2 — Cloudflare Workers / PiHarness, BYO model API or Faux. */
 import { Agent } from 'agents';
 import { PiHarness } from 'agents/harness/pi';
 import { createModels } from '@earendil-works/pi-ai/models';
-import { DEFAULT_CONFIG, configuredProvider, validateModelConfig, sealKey, openKey } from './model-config.js';
+import { DEFAULT_CONFIG, configuredProvider, modelDescriptor, validateModelConfig, sealKey, openKey } from './model-config.js';
+import { ClientError, readJsonObject, publicError } from './http-utils.js';
 import { fauxProvider, fauxAssistantMessage, fauxToolCall } from '@earendil-works/pi-ai/providers/faux';
 import { Type } from '@earendil-works/pi-ai';
 import { createRegistry, defineExtension, defineTool, Harness } from '@earendil-works/pi-durable';
@@ -95,6 +92,7 @@ export class Assistant extends Agent {
     });
     this.lifecycle.use(this.harness);
     this.fauxModel = faux.getModel();
+    this.modelUpdating = false;
   }
 
   ensureModelTable() {
@@ -110,7 +108,7 @@ export class Assistant extends Agent {
 
   async decryptSavedKey() {
     const row = this.readModelRow();
-    if (!row?.secret) throw new Error('未配置模型 API Key');
+    if (!row?.secret) throw new ClientError('未配置模型 API Key');
     return openKey(row.secret, this.env.ACCESS_TOKEN);
   }
 
@@ -120,40 +118,65 @@ export class Assistant extends Agent {
   }
 
   async saveModelSettings(raw) {
-    // Never switch providers in the middle of a model call.
-    const pending = await this.harness.pending();
-    if (pending.length) throw new Error('当前还有未完成任务，请完成后再切换模型');
-    const config = validateModelConfig(raw);
-    const old = this.readModelRow();
-    const oldConfig = old ? JSON.parse(old.config) : DEFAULT_CONFIG;
-    let secret = null;
-    if (config.api !== 'faux') {
-      const newKey = typeof raw.apiKey === 'string' ? raw.apiKey.trim() : '';
-      if (newKey) {
-        if (newKey.length < 8 || newKey.length > 8192) throw new Error('API Key 长度需为 8–8192 字符');
-        secret = await sealKey(newKey, this.env.ACCESS_TOKEN);
-      } else if (old?.secret && oldConfig.api === config.api && oldConfig.baseUrl === config.baseUrl) {
-        secret = old.secret;
-      } else {
-        throw new Error('首次配置或更换接口地址时，必须填写 API Key');
+    // DO RPC calls may interleave at an await. Guard the model transition and
+    // reject new chats until both the Pi session model and persisted config agree.
+    if (this.modelUpdating) throw new ClientError('正在更新模型配置，请稍后重试', 409);
+    this.modelUpdating = true;
+    try {
+      const config = validateModelConfig(raw);
+      const pending = await this.harness.pending();
+      if (pending.length) throw new ClientError('当前还有未完成任务，请完成后再切换模型', 409);
+      const session = await this.harness.session();
+      if (await session.busy()) throw new ClientError('Agent 正在执行，请完成后再切换模型', 409);
+
+      const old = this.readModelRow();
+      const oldConfig = old ? JSON.parse(old.config) : DEFAULT_CONFIG;
+      let secret = null;
+      if (config.api !== 'faux') {
+        const newKey = typeof raw.apiKey === 'string' ? raw.apiKey.trim() : '';
+        if (newKey) {
+          if (newKey.length < 8 || newKey.length > 8192) {
+            throw new ClientError('API Key 长度需为 8–8192 字符');
+          }
+          secret = await sealKey(newKey, this.env.ACCESS_TOKEN);
+        } else if (old?.secret && oldConfig.api === config.api && oldConfig.baseUrl === config.baseUrl) {
+          // A rotated ACCESS_TOKEN cannot decrypt the old row. Catch this now,
+          // not in a background model call after the form reports success.
+          try { await openKey(old.secret, this.env.ACCESS_TOKEN); }
+          catch { throw new ClientError('已有模型 Key 无法解密，请重新填写 API Key'); }
+          secret = old.secret;
+        } else {
+          throw new ClientError('首次配置或更换接口地址时，必须填写 API Key');
+        }
       }
+
+      const model = config.api === 'faux'
+        ? this.fauxModel
+        : (() => {
+            if (!this.models) throw new Error('Pi 模型注册表尚未初始化');
+            const configured = configuredProvider(config, () => this.decryptSavedKey());
+            this.models.setProvider(configured.provider);
+            return configured.model;
+          })();
+
+      // setModel must succeed before we commit the settings. On storage failure,
+      // restore the old session model rather than returning an inconsistent state.
+      const previousModel = oldConfig.api === 'faux' ? this.fauxModel : modelDescriptor(oldConfig);
+      await session.setModel(model);
+      try {
+        this.ctx.storage.sql.exec(
+          'INSERT INTO edge_model_settings (id, config, secret) VALUES (1, ?, ?) ON CONFLICT(id) DO UPDATE SET config = excluded.config, secret = excluded.secret',
+          JSON.stringify(config), secret
+        );
+      } catch (error) {
+        try { await session.setModel(previousModel); }
+        catch { /* surface original persistence failure; log only the error name */ }
+        throw error;
+      }
+      return { ...config, hasKey: Boolean(secret) };
+    } finally {
+      this.modelUpdating = false;
     }
-    const session = await this.harness.session();
-    if (await session.busy()) throw new Error('Agent 正在执行，请完成后再切换模型');
-    const model = config.api === 'faux'
-      ? this.fauxModel
-      : (() => {
-          const configured = configuredProvider(config, () => this.decryptSavedKey());
-          if (!this.models) throw new Error('模型注册表尚未初始化');
-          this.models.setProvider(configured.provider);
-          return configured.model;
-        })();
-    this.ctx.storage.sql.exec(
-      'INSERT INTO edge_model_settings (id, config, secret) VALUES (1, ?, ?) ON CONFLICT(id) DO UPDATE SET config = excluded.config, secret = excluded.secret',
-      JSON.stringify(config), secret
-    );
-    await session.setModel(model);
-    return { ...config, hasKey: Boolean(secret) };
   }
 
   ensureTable() {
@@ -163,8 +186,9 @@ export class Assistant extends Agent {
   }
 
   async startChat(text, operationId) {
-    if (typeof text !== 'string' || text.trim().length < 1 || text.length > 4000) throw new Error('消息长度须为 1–4000 字');
-    if (typeof operationId !== 'string' || !/^[a-zA-Z0-9_-]{8,80}$/.test(operationId)) throw new Error('operationId 格式错误');
+    if (this.modelUpdating) throw new ClientError('正在切换模型，请稍后发送消息', 409);
+    if (typeof text !== 'string' || text.trim().length < 1 || text.length > 4000) throw new ClientError('消息长度须为 1–4000 字');
+    if (typeof operationId !== 'string' || !/^[a-zA-Z0-9_-]{8,80}$/.test(operationId)) throw new ClientError('operationId 格式错误');
     const receipt = await this.harness.submit(text.trim(), { operationId });
     return { operationId: receipt.operationId, accepted: receipt.accepted };
   }
@@ -182,8 +206,8 @@ export class Assistant extends Agent {
   }
 
   async createReminder(text, seconds) {
-    if (typeof text !== 'string' || !text.trim() || text.length > 200) throw new Error('提醒内容须为 1–200 字');
-    if (!Number.isInteger(seconds) || seconds < 5 || seconds > 3600) throw new Error('延迟必须在 5–3600 秒之间');
+    if (typeof text !== 'string' || !text.trim() || text.length > 200) throw new ClientError('提醒内容须为 1–200 字');
+    if (!Number.isInteger(seconds) || seconds < 5 || seconds > 3600) throw new ClientError('延迟必须在 5–3600 秒之间');
     this.ensureTable();
     const id = crypto.randomUUID();
     const dueAt = Date.now() + seconds * 1000;
@@ -229,26 +253,25 @@ export default {
       if (request.method === 'GET' && url.pathname === '/api/state') return json(await agent.snapshot());
       if (request.method === 'GET' && url.pathname === '/api/model') return json(await agent.modelSettings());
       if (request.method === 'PUT' && url.pathname === '/api/model') {
-        const body = await request.json();
-        try { return json(await agent.saveModelSettings(body)); }
-        catch (error) {
-          console.warn('model settings rejected', error instanceof Error ? error.message : 'unknown');
-          return json({ error: '模型配置失败：' + (error instanceof Error ? error.message : '参数无效') }, 400);
-        }
+        const body = await readJsonObject(request);
+        return json(await agent.saveModelSettings(body));
       }
       if (request.method === 'POST' && url.pathname === '/api/chat') {
-        const body = await request.json();
-        return json(await agent.startChat(body?.text, body?.operationId), 202);
+        const body = await readJsonObject(request);
+        return json(await agent.startChat(body.text, body.operationId), 202);
       }
       if (request.method === 'POST' && url.pathname === '/api/reminders') {
-        const body = await request.json();
-        return json(await agent.createReminder(body?.text, body?.seconds), 201);
+        const body = await readJsonObject(request);
+        return json(await agent.createReminder(body.text, body.seconds), 201);
       }
       return json({ error: 'Not found' }, 404);
     } catch (error) {
-      // Avoid leaking internal stack traces or credentials to public clients.
-      console.error('edge api failed', error);
-      return json({ error: '请求失败，请查看 Workers 日志并检查输入和配额。' }, 500);
+      const client = publicError(error);
+      if (client.status >= 500) {
+        // Don't include provider exception messages, request bodies or API keys.
+        console.error('edge API failed:', error instanceof Error ? error.name : 'unknown');
+      }
+      return json({ error: client.message }, client.status);
     }
   },
 };
