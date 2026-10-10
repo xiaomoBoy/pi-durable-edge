@@ -258,8 +258,8 @@ export default {
     if (!url.pathname.startsWith('/api/')) return env.ASSETS.fetch(request);
     if (!env.ACCESS_TOKEN || env.ACCESS_TOKEN.length < 24) return json({ error: '尚未配置 ACCESS_TOKEN（至少 24 字符）' }, 503);
     if (!authenticate(request, env.ACCESS_TOKEN)) return json({ error: '访问令牌无效' }, 401);
-    const agent = env.Assistant.getByName('owner');
     try {
+      const agent = env.Assistant.getByName('owner');
       if (request.method === 'GET' && url.pathname === '/api/state') return json(await agent.snapshot());
       if (request.method === 'GET' && url.pathname === '/api/model') return json(await agent.modelSettings());
       if (request.method === 'PUT' && url.pathname === '/api/model') {
