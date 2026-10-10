@@ -1,3 +1,4 @@
+import { ClientError } from './http-utils.js';
 import { createProvider } from '@earendil-works/pi-ai';
 import { openAICompletionsApi } from '@earendil-works/pi-ai/api/openai-completions.lazy';
 import { openAIResponsesApi } from '@earendil-works/pi-ai/api/openai-responses.lazy';
@@ -49,32 +50,36 @@ export async function openKey(sealed, accessToken) {
 }
 
 export function validateModelConfig(raw) {
-  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) throw new Error('模型配置无效');
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) throw new ClientError('模型配置无效');
   const api = String(raw.api || 'faux');
   if (api === 'faux') return { ...DEFAULT_CONFIG };
-  if (!(api in ENDPOINTS)) throw new Error('仅支持 OpenAI Completions、OpenAI Responses、Anthropic Messages');
+  if (!(api in ENDPOINTS)) throw new ClientError('仅支持 OpenAI Completions、OpenAI Responses、Anthropic Messages');
   const model = String(raw.model ?? '').trim();
-  if (!model || model.length > 160 || /[\u0000-\u001f]/.test(model)) throw new Error('模型 ID 必须为 1–160 个有效字符');
+  if (!model || model.length > 160 || /[\u0000-\u001f]/.test(model)) throw new ClientError('模型 ID 必须为 1–160 个有效字符');
   const suppliedBaseUrl = String(raw.baseUrl || ENDPOINTS[api]).trim();
-  if (suppliedBaseUrl.length > 500) throw new Error('Base URL 长度不能超过 500');
+  if (suppliedBaseUrl.length > 500) throw new ClientError('Base URL 长度不能超过 500');
   let url;
-  try { url = new URL(suppliedBaseUrl); } catch { throw new Error('Base URL 无效'); }
+  try { url = new URL(suppliedBaseUrl); } catch { throw new ClientError('Base URL 无效'); }
   if (url.protocol !== 'https:' || url.username || url.password || url.search || url.hash) {
-    throw new Error('Base URL 必须是 HTTPS 地址，不能包含账号、密码、查询参数或 #');
+    throw new ClientError('Base URL 必须是 HTTPS 地址，不能包含账号、密码、查询参数或 #');
   }
-  const hostname = url.hostname.toLowerCase();
-  if (hostname === 'localhost' || hostname.endsWith('.localhost') ||
-      hostname.endsWith('.local') || hostname.endsWith('.internal') ||
-      hostname === 'metadata.google.internal' ||
-      /^(127|10|0|169\.254|192\.168)\./.test(hostname) ||
-      /^172\.(1[6-9]|2\d|3[01])\./.test(hostname) || hostname === '[::1]') {
-    throw new Error('Base URL 不允许访问本地和私有网络地址');
+  // URL() canonicalizes numeric IPv4 aliases (127.1, 2130706433, 0x7f000001).
+  // Reject all literal IP targets and local-only DNS names: this is a BYO HTTPS
+  // provider, not an arbitrary internal-network HTTP relay.
+  const hostname = url.hostname.toLowerCase().replace(/\.$/, '');
+  const ipLiteral = /^(?:\d{1,3}\.){3}\d{1,3}$/.test(hostname) ||
+    hostname.includes(':') || /^\[.*\]$/.test(hostname);
+  const localName = hostname === 'localhost' ||
+    hostname === 'metadata.google.internal' ||
+    ['.localhost', '.local', '.internal', '.lan', '.home', '.test'].some((suffix) => hostname.endsWith(suffix));
+  if (ipLiteral || localName || !hostname.includes('.')) {
+    throw new ClientError('Base URL 必须是公共 HTTPS 域名，不能使用 IP、localhost 或本地网络域名');
   }
   const contextWindow = Number(raw.contextWindow);
   const maxTokens = Number(raw.maxTokens);
-  if (!Number.isInteger(contextWindow) || contextWindow < 4096 || contextWindow > 2000000) throw new Error('上下文窗口需为 4096–2000000');
-  if (!Number.isInteger(maxTokens) || maxTokens < 128 || maxTokens > contextWindow) throw new Error('最大输出 Token 需为 128 到上下文窗口大小');
-  if (typeof raw.reasoning !== 'boolean') throw new Error('推理能力必须是布尔值');
+  if (!Number.isInteger(contextWindow) || contextWindow < 4096 || contextWindow > 2000000) throw new ClientError('上下文窗口需为 4096–2000000');
+  if (!Number.isInteger(maxTokens) || maxTokens < 128 || maxTokens > contextWindow) throw new ClientError('最大输出 Token 需为 128 到上下文窗口大小');
+  if (typeof raw.reasoning !== 'boolean') throw new ClientError('推理能力必须是布尔值');
   return { api, baseUrl: url.toString().replace(/\/$/, ''), model, reasoning: raw.reasoning, contextWindow, maxTokens };
 }
 
