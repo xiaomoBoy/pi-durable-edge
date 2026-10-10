@@ -4,9 +4,9 @@
 
 [![Deploy to Cloudflare](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/xiaomoBoy/pi-durable-edge)
 
-**[中文部署教程](docs/DEPLOY.md)** · [v0.2 开发和验收路线图](docs/V02_PLAN.md)
+**[中文部署教程](docs/DEPLOY.md)** · [发布审查与测试矩阵](docs/RELEASE_CHECKLIST.md) · [后续路线图](docs/V02_PLAN.md)
 
-> **v0.2**：代码与 GitHub CI 已验证；尚未在 Cloudflare 真实账户完成模型调用和恢复的端到端验收。不要将构建成功等同于线上成功。
+> **v0.2.1**：已通过单元测试、Wrangler 打包和本地 Durable Object HTTP 集成测试；Cloudflare 账户的远端部署、真实 OpenAI/Anthropic API 和崩溃恢复仍待实测。
 
 ## 功能
 
@@ -29,6 +29,15 @@
 完成后打开 Cloudflare 给出的 `workers.dev` 地址，输入同一个 `ACCESS_TOKEN`；在 Faux 模式点击 **一键功能自检**。再按需在右侧模型配置中添加自己的 API。
 
 **重要：**从一键部署按钮创建的第一条构建是 `seed_repo override`，不能用 **Retry build** 重跑。新代码应提交到它**实际关联的 GitHub 仓库**，由新 commit 触发构建。完整说明、授权修复及 Wrangler 备用方案见 [部署教程](docs/DEPLOY.md)。
+
+## v0.2.1 质量审查
+
+- 限制 JSON 请求体到 16 KiB；无效输入在 Durable Object RPC 跨边界后仍返回正确 4xx。
+- 模型切换加互斥和回滚；自定义 API Base URL 禁止 HTTP、IP 和本地域名。
+- 模型 Key 加密并隐藏，内部运行错误脱敏；静态页面新增同源 CSP 和禁缓存响应头。
+- CI 增加真正的 **Wrangler 本地 Worker / Durable Object** HTTP 测试，覆盖 Faux 对话、幂等、Alarm 和无付费请求的模型配置切换。
+
+[完整回归清单、风险与远端测试步骤](docs/RELEASE_CHECKLIST.md)。
 
 ## 本地验证
 

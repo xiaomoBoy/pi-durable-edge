@@ -1,4 +1,4 @@
-# Pi Durable Edge v0.2：部署、更新与故障排查
+# Pi Durable Edge v0.2.1：部署、更新与故障排查
 
 ## 先理解两个不同的“部署”
 
@@ -51,6 +51,9 @@ Cloudflare 将**创建新的 GitHub 仓库副本**并连接 Workers Builds；以
 如果 GitHub 上已经有一个同名仓库，导入时可选择其他副本仓库名；不要误以为重新点按钮会刷新已有 Worker。
 
 ## 3. 验收
+
+[发布前回归与远端待测清单](RELEASE_CHECKLIST.md)。本地 Wrangler 烟雾测试通过，不等于真实 Cloudflare 账户与真实模型 API 已通过。
+
 
 1. 打开 `workers.dev` URL，输入 `ACCESS_TOKEN` 并连接。
 2. Faux 模式点击 **一键功能自检**：检查持久化聊天、幂等 operationId、SQLite 状态和持久提醒（最长 60 秒）。
