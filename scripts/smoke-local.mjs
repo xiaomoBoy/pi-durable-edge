@@ -58,6 +58,9 @@ async function main() {
   assert.equal(unauthorized.status, 401, 'API must reject requests without Bearer token');
   const css = await fetch(base + '/style.css');
   assert.equal(css.status, 200);
+  const page = await fetch(base + '/');
+  assert.match(page.headers.get('content-security-policy') || '', /default-src 'self'/);
+  assert.equal(page.headers.get('x-content-type-options'), 'nosniff');
   const state = await fetchJson('/api/state');
   assert.equal(state.status, 200, JSON.stringify(state.body));
   assert.ok(Array.isArray(state.body.messages));
@@ -86,6 +89,9 @@ async function main() {
   const repeated = await fetchJson('/api/chat', { method: 'POST', body: payload });
   assert.equal(repeated.status, 202);
   assert.equal(repeated.body.accepted, false);
+
+  const switchWhileBusy = await fetchJson('/api/model', { method: 'PUT', body: JSON.stringify({ api: 'faux' }) });
+  assert.equal(switchWhileBusy.status, 409, 'Model switching must be blocked with running work');
 
   const reminder = await fetchJson('/api/reminders', { method: 'POST', body: JSON.stringify({ text: 'smoke reminder', seconds: 5 }) });
   assert.equal(reminder.status, 201, JSON.stringify(reminder.body));
